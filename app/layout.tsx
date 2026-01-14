@@ -17,6 +17,9 @@ export const metadata: Metadata = {
   title: "S3cretBox - Your Encrypted S3-Powered Cloud Vault",
   description:
     "Securely manage your AWS S3 files with local encryption, zero backend storage, and complete privacy control. Built with modern web technologies for maximum security.",
+  icons: {
+    icon: "/a%26a-logo.png",
+  },
 };
 
 export default function RootLayout({

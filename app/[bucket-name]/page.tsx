@@ -21,6 +21,11 @@ import {
   S3File,
   S3Bucket,
 } from "./components";
+import {
+  demoBucket,
+  getDemoFilesForPath,
+  searchDemoFiles,
+} from "../../lib/demo-data";
 
 export default function BucketFileManager() {
   const params = useParams();
@@ -28,6 +33,7 @@ export default function BucketFileManager() {
   const searchParams = useSearchParams();
   const bucketName = params["bucket-name"] as string;
   const currentPath = searchParams.get("path") || "";
+  const isDemo = bucketName === "demo-bucket";
 
   // All state hooks must be called before any conditional returns
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -110,6 +116,14 @@ export default function BucketFileManager() {
     setBucketExists(false);
 
     const checkBucketExists = () => {
+      // Handle demo bucket
+      if (isDemo) {
+        setBucketExists(true);
+        setBucketCredentials(demoBucket);
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const savedBuckets = localStorage.getItem("s3cretbox-buckets");
         if (savedBuckets) {
@@ -146,11 +160,18 @@ export default function BucketFileManager() {
     const timeoutId = setTimeout(checkBucketExists, 100);
 
     return () => clearTimeout(timeoutId);
-  }, [bucketName]);
+  }, [bucketName, isDemo]);
 
   // Utility function to refresh files
   const refreshFiles = async () => {
     if (!bucketCredentials) return;
+
+    // Handle demo bucket
+    if (isDemo) {
+      const demoFiles = getDemoFilesForPath(currentPath);
+      setAllFiles(demoFiles);
+      return;
+    }
 
     try {
       const params = {
@@ -177,6 +198,15 @@ export default function BucketFileManager() {
       if (!bucketCredentials) return;
 
       setIsLoadingFiles(true);
+
+      // Handle demo bucket
+      if (isDemo) {
+        const demoFiles = getDemoFilesForPath(currentPath);
+        setAllFiles(demoFiles);
+        setIsLoadingFiles(false);
+        return;
+      }
+
       try {
         const params = {
           prefix: currentPath,
@@ -200,7 +230,7 @@ export default function BucketFileManager() {
     };
 
     fetchFiles();
-  }, [bucketCredentials, currentPath]);
+  }, [bucketCredentials, currentPath, isDemo]);
 
   // Show loading state while checking bucket existence
   if (isLoading) {
@@ -220,9 +250,20 @@ export default function BucketFileManager() {
   // Get files for current path - now files are already filtered by path from API
   const currentFiles = allFiles;
 
-  const filteredFiles = currentFiles.filter((file) =>
-    file.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase())
-  );
+  // Filter files based on search query (including demo search)
+  const normalizedPath = currentPath
+    ? currentPath.endsWith("/")
+      ? currentPath
+      : currentPath + "/"
+    : "";
+  const filteredFiles =
+    debouncedSearchQuery && isDemo
+      ? searchDemoFiles(debouncedSearchQuery).filter(
+          (file) => file.path === normalizedPath
+        )
+      : currentFiles.filter((file) =>
+          file.name.toLowerCase().includes(debouncedSearchQuery.toLowerCase())
+        );
 
   // Generate breadcrumb from current path
   const pathSegments = currentPath ? currentPath.split("/") : [];
@@ -248,6 +289,16 @@ export default function BucketFileManager() {
 
   const handleFileUpload = async (files: FileList) => {
     if (!bucketCredentials || files.length === 0) return;
+
+    // Block upload in demo mode
+    if (isDemo) {
+      showNotification(
+        "warning",
+        "Demo Mode",
+        "File upload is disabled in demo mode. Add your own S3 bucket to enable uploads."
+      );
+      return;
+    }
 
     setIsUploading(true);
 
@@ -305,6 +356,18 @@ export default function BucketFileManager() {
   const confirmDeleteFile = async () => {
     if (!bucketCredentials || !fileToDelete || !fileToDelete.key) return;
 
+    // Block delete in demo mode
+    if (isDemo) {
+      showNotification(
+        "warning",
+        "Demo Mode",
+        "File deletion is disabled in demo mode. Add your own S3 bucket to enable deletions."
+      );
+      setShowDeleteConfirm(false);
+      setFileToDelete(null);
+      return;
+    }
+
     setIsDeleting(true);
     setDeletingFileId(fileToDelete.id);
 
@@ -345,6 +408,21 @@ export default function BucketFileManager() {
   };
 
   const handleDownloadFile = async (file: S3File) => {
+    // Demo mode: show notification for downloads
+    if (isDemo) {
+      if (isImageFile(file.name) && file.url) {
+        // Allow image preview in demo mode
+        setImagePreview({ isOpen: true, file });
+      } else {
+        showNotification(
+          "warning",
+          "Demo Mode",
+          "File download is disabled in demo mode. Add your own S3 bucket to enable downloads."
+        );
+      }
+      return;
+    }
+
     if (file.url && bucketCredentials) {
       // Check if it's an image file
       if (isImageFile(file.name)) {

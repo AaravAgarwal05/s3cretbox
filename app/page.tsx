@@ -39,6 +39,7 @@ import {
   Cloud,
   Lock,
   BookOpen,
+  Play,
   Github,
   AlertTriangle,
   Monitor,
@@ -489,14 +490,16 @@ export default function Homepage() {
                               AWS Setup Guide
                             </Button>
                           </Link>
-                          <Button
-                            variant="outline"
-                            size="lg"
-                            className="border-2 border-zinc-300 dark:border-zinc-700 px-8 py-6 text-lg font-semibold rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all duration-200"
-                          >
-                            <Github className="w-5 h-5 mr-2" />
-                            View on GitHub
-                          </Button>
+                          <Link href="/demo-bucket">
+                            <Button
+                              variant="outline"
+                              size="lg"
+                              className="border-2 border-emerald-300 dark:border-emerald-700 px-8 py-6 text-lg font-semibold rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-all duration-200 w-full"
+                            >
+                              <Play className="w-5 h-5 mr-2" />
+                              Try Demo
+                            </Button>
+                          </Link>
                         </div>
                       </div>
                     </div>

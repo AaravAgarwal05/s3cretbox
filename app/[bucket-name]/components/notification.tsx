@@ -1,5 +1,9 @@
 import { Button } from "../../../components/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "../../../components/ui/alert";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "../../../components/ui/alert";
 import { CheckCircle, XCircle, AlertTriangle, X } from "lucide-react";
 
 interface NotificationProps {
