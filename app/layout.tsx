@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "../components/theme-provider";
+import { UploadManagerProvider } from "../lib/upload-manager";
+import { FloatingUploadPanel } from "../components/floating-upload-panel";
+import { CacheManager } from "../components/cache-manager";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +35,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased font-sans`}
       >
-        <ThemeProvider defaultTheme="system">{children}</ThemeProvider>
+        <ThemeProvider defaultTheme="system">
+          <UploadManagerProvider>
+            <CacheManager>
+              {children}
+              <FloatingUploadPanel />
+            </CacheManager>
+          </UploadManagerProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+} from "@aws-sdk/client-s3";
 
 export async function DELETE(
   request: NextRequest,
@@ -12,6 +17,7 @@ export async function DELETE(
     const accessKey = searchParams.get("accessKey");
     const secretKey = searchParams.get("secretKey");
     const region = searchParams.get("region");
+    const isFolder = searchParams.get("isFolder") === "true";
 
     if (!fileKey || !accessKey || !secretKey || !region) {
       return NextResponse.json(
@@ -31,15 +37,68 @@ export async function DELETE(
       },
     });
 
-    // Delete the object
-    const command = new DeleteObjectCommand({
-      Bucket: decodedBucketName,
-      Key: fileKey,
-    });
+    if (isFolder) {
+      // For folders, we need to delete all objects with this prefix
+      const folderPrefix = fileKey.endsWith("/") ? fileKey : `${fileKey}/`;
 
-    await s3Client.send(command);
+      let continuationToken: string | undefined;
+      let deletedCount = 0;
 
-    return NextResponse.json({ success: true });
+      do {
+        // List all objects with this prefix
+        const listCommand = new ListObjectsV2Command({
+          Bucket: decodedBucketName,
+          Prefix: folderPrefix,
+          ContinuationToken: continuationToken,
+        });
+
+        const listResponse = await s3Client.send(listCommand);
+        const objects = listResponse.Contents || [];
+
+        if (objects.length > 0) {
+          // Delete objects in batches (max 1000 per request)
+          const deleteCommand = new DeleteObjectsCommand({
+            Bucket: decodedBucketName,
+            Delete: {
+              Objects: objects.map((obj) => ({ Key: obj.Key })),
+              Quiet: true,
+            },
+          });
+
+          await s3Client.send(deleteCommand);
+          deletedCount += objects.length;
+        }
+
+        continuationToken = listResponse.NextContinuationToken;
+      } while (continuationToken);
+
+      // Also delete the folder marker itself (the empty object with trailing slash)
+      try {
+        const deleteFolderMarker = new DeleteObjectCommand({
+          Bucket: decodedBucketName,
+          Key: folderPrefix,
+        });
+        await s3Client.send(deleteFolderMarker);
+      } catch {
+        // Folder marker might not exist, ignore error
+      }
+
+      return NextResponse.json({
+        success: true,
+        deletedCount,
+        message: `Deleted folder and ${deletedCount} object(s)`,
+      });
+    } else {
+      // Delete single file
+      const command = new DeleteObjectCommand({
+        Bucket: decodedBucketName,
+        Key: fileKey,
+      });
+
+      await s3Client.send(command);
+
+      return NextResponse.json({ success: true });
+    }
   } catch (error) {
     console.error("Error deleting S3 file:", error);
     return NextResponse.json(

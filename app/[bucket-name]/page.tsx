@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { Input } from "../../components/ui/input";
+import { Button } from "../../components/ui/button";
 import { TopRightControls } from "../../components/top-right-controls";
-import { Search, FolderOpen } from "lucide-react";
+import { Search, FolderOpen, Trash2, X, CheckSquare } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { notFound } from "next/navigation";
 import {
@@ -15,7 +16,9 @@ import {
   BreadcrumbNavigation,
   Notification,
   DeleteConfirmationDialog,
+  BulkDeleteDialog,
   UploadDialog,
+  CreateFolderDialog,
   ViewModeControls,
   ImagePreviewDialog,
   S3File,
@@ -26,6 +29,9 @@ import {
   getDemoFilesForPath,
   searchDemoFiles,
 } from "../../lib/demo-data";
+import { useUploadManager } from "../../lib/upload-manager";
+import { useFiles } from "../../lib/use-files";
+import { imageCache } from "../../lib/cache";
 
 export default function BucketFileManager() {
   const params = useParams();
@@ -35,28 +41,50 @@ export default function BucketFileManager() {
   const currentPath = searchParams.get("path") || "";
   const isDemo = bucketName === "demo-bucket";
 
+  // Upload manager for background uploads
+  const { addFilesToUpload, setOnUploadComplete } = useUploadManager();
+
   // All state hooks must be called before any conditional returns
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
-  const [allFiles, setAllFiles] = useState<S3File[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [bucketExists, setBucketExists] = useState(false);
   const [bucketCredentials, setBucketCredentials] = useState<S3Bucket | null>(
     null
   );
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+
+  // SWR-based file caching
+  const {
+    files: allFiles,
+    isLoading: isLoadingFiles,
+    isValidating,
+    mutate: refreshFiles,
+  } = useFiles({
+    bucketCredentials,
+    currentPath,
+    isDemo,
+  });
 
   // New state for notifications and loading
-  const [isUploading, setIsUploading] = useState(false);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fileToDelete, setFileToDelete] = useState<S3File | null>(null);
   const [notification, setNotification] = useState<{
-    type: "success" | "error" | "warning";
+    type: "success" | "error" | "warning" | "info";
     title: string;
     message: string;
+  } | null>(null);
+
+  // State for multi-select
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [bulkDeletionProgress, setBulkDeletionProgress] = useState<{
+    current: number;
+    total: number;
   } | null>(null);
 
   // State for image preview
@@ -65,9 +93,12 @@ export default function BucketFileManager() {
     file: S3File | null;
   }>({ isOpen: false, file: null });
 
+  // State for download
+  const [isDownloading, setIsDownloading] = useState(false);
+
   // Function to show notifications
   const showNotification = (
-    type: "success" | "error" | "warning",
+    type: "success" | "error" | "warning" | "info",
     title: string,
     message: string
   ) => {
@@ -162,75 +193,11 @@ export default function BucketFileManager() {
     return () => clearTimeout(timeoutId);
   }, [bucketName, isDemo]);
 
-  // Utility function to refresh files
-  const refreshFiles = async () => {
-    if (!bucketCredentials) return;
-
-    // Handle demo bucket
-    if (isDemo) {
-      const demoFiles = getDemoFilesForPath(currentPath);
-      setAllFiles(demoFiles);
-      return;
-    }
-
-    try {
-      const params = {
-        prefix: currentPath,
-        accessKey: bucketCredentials.accessKey,
-        secretKey: bucketCredentials.secretKey,
-        region: bucketCredentials.region,
-      };
-
-      const response = await axios.get(
-        `/api/s3/${encodeURIComponent(bucketCredentials.name)}/files`,
-        { params }
-      );
-
-      setAllFiles(response.data.items || []);
-    } catch (error) {
-      console.error("Error refreshing files:", error);
-    }
-  };
-
-  // Fetch files from S3 API
+  // Register refresh callback with upload manager for auto-refresh on upload complete
   useEffect(() => {
-    const fetchFiles = async () => {
-      if (!bucketCredentials) return;
-
-      setIsLoadingFiles(true);
-
-      // Handle demo bucket
-      if (isDemo) {
-        const demoFiles = getDemoFilesForPath(currentPath);
-        setAllFiles(demoFiles);
-        setIsLoadingFiles(false);
-        return;
-      }
-
-      try {
-        const params = {
-          prefix: currentPath,
-          accessKey: bucketCredentials.accessKey,
-          secretKey: bucketCredentials.secretKey,
-          region: bucketCredentials.region,
-        };
-
-        const response = await axios.get(
-          `/api/s3/${encodeURIComponent(bucketCredentials.name)}/files`,
-          { params }
-        );
-
-        setAllFiles(response.data.items || []);
-      } catch (error) {
-        console.error("Error fetching files:", error);
-        setAllFiles([]);
-      } finally {
-        setIsLoadingFiles(false);
-      }
-    };
-
-    fetchFiles();
-  }, [bucketCredentials, currentPath, isDemo]);
+    setOnUploadComplete(() => refreshFiles());
+    return () => setOnUploadComplete(undefined);
+  }, [refreshFiles, setOnUploadComplete]);
 
   // Show loading state while checking bucket existence
   if (isLoading) {
@@ -300,51 +267,67 @@ export default function BucketFileManager() {
       return;
     }
 
-    setIsUploading(true);
+    // Use the background upload manager
+    addFilesToUpload(files, bucketCredentials.name, currentPath, {
+      accessKey: bucketCredentials.accessKey,
+      secretKey: bucketCredentials.secretKey,
+      region: bucketCredentials.region,
+    });
+
+    showNotification(
+      "success",
+      "Upload Started",
+      `${files.length} file${
+        files.length !== 1 ? "s" : ""
+      } added to upload queue`
+    );
+  };
+
+  const handleCreateFolder = async (folderName: string) => {
+    if (!bucketCredentials || !folderName) return;
+
+    // Block folder creation in demo mode
+    if (isDemo) {
+      showNotification(
+        "warning",
+        "Demo Mode",
+        "Folder creation is disabled in demo mode. Add your own S3 bucket to enable this feature."
+      );
+      return;
+    }
+
+    setIsCreatingFolder(true);
 
     try {
-      let uploadedCount = 0;
-
-      // Upload each file
-      for (const file of Array.from(files)) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("prefix", currentPath ? `${currentPath}/` : "");
-        formData.append("accessKey", bucketCredentials.accessKey);
-        formData.append("secretKey", bucketCredentials.secretKey);
-        formData.append("region", bucketCredentials.region);
-
-        await axios.post(
-          `/api/s3/${encodeURIComponent(bucketCredentials.name)}/upload`,
-          formData,
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-          }
-        );
-        uploadedCount++;
-      }
+      await axios.post(
+        `/api/s3/${encodeURIComponent(bucketCredentials.name)}/create-folder`,
+        {
+          folderName,
+          prefix: currentPath ? `${currentPath}/` : "",
+          accessKey: bucketCredentials.accessKey,
+          secretKey: bucketCredentials.secretKey,
+          region: bucketCredentials.region,
+        }
+      );
 
       showNotification(
         "success",
-        "Upload Complete",
-        `Successfully uploaded ${uploadedCount} file${
-          uploadedCount !== 1 ? "s" : ""
-        }`
+        "Folder Created",
+        `Successfully created folder "${folderName}"`
       );
       await refreshFiles();
     } catch (error) {
-      console.error("Upload error:", error);
+      console.error("Folder creation error:", error);
       showNotification(
         "error",
-        "Upload Failed",
-        "Failed to upload files. Please try again."
+        "Creation Failed",
+        "Failed to create folder. Please try again."
       );
     } finally {
-      setIsUploading(false);
+      setIsCreatingFolder(false);
     }
   };
+
   const handleDeleteFile = (fileId: string) => {
     const file = allFiles.find((f) => f.id === fileId);
     if (!file) return;
@@ -372,12 +355,17 @@ export default function BucketFileManager() {
     setDeletingFileId(fileToDelete.id);
 
     try {
-      const params = {
+      const params: Record<string, string> = {
         key: fileToDelete.key,
         accessKey: bucketCredentials.accessKey,
         secretKey: bucketCredentials.secretKey,
         region: bucketCredentials.region,
       };
+
+      // Add isFolder flag for folders to enable recursive deletion
+      if (fileToDelete.isFolder) {
+        params.isFolder = "true";
+      }
 
       await axios.delete(
         `/api/s3/${encodeURIComponent(bucketCredentials.name)}/delete`,
@@ -407,6 +395,118 @@ export default function BucketFileManager() {
     }
   };
 
+  // Multi-select handlers
+  const toggleFileSelection = (fileId: string) => {
+    setSelectedFiles((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(fileId)) {
+        newSet.delete(fileId);
+      } else {
+        newSet.add(fileId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllFiles = () => {
+    setSelectedFiles(new Set(filteredFiles.map((f) => f.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedFiles(new Set());
+    setIsSelectionMode(false);
+  };
+
+  const getSelectedFileObjects = (): S3File[] => {
+    return allFiles.filter((f) => selectedFiles.has(f.id));
+  };
+
+  const confirmBulkDelete = async () => {
+    if (!bucketCredentials) return;
+
+    // Block delete in demo mode
+    if (isDemo) {
+      showNotification(
+        "warning",
+        "Demo Mode",
+        "File deletion is disabled in demo mode. Add your own S3 bucket to enable deletions."
+      );
+      setShowBulkDeleteConfirm(false);
+      return;
+    }
+
+    const filesToDelete = getSelectedFileObjects().filter((f) => f.key);
+    if (filesToDelete.length === 0) return;
+
+    setIsDeleting(true);
+    setBulkDeletionProgress({ current: 0, total: filesToDelete.length });
+
+    let deletedCount = 0;
+    let failedCount = 0;
+
+    try {
+      for (const file of filesToDelete) {
+        try {
+          const params: Record<string, string> = {
+            key: file.key!,
+            accessKey: bucketCredentials.accessKey,
+            secretKey: bucketCredentials.secretKey,
+            region: bucketCredentials.region,
+          };
+
+          // Add isFolder flag for folders to enable recursive deletion
+          if (file.isFolder) {
+            params.isFolder = "true";
+          }
+
+          await axios.delete(
+            `/api/s3/${encodeURIComponent(bucketCredentials.name)}/delete`,
+            { params }
+          );
+          deletedCount++;
+        } catch {
+          failedCount++;
+        }
+        setBulkDeletionProgress({
+          current: deletedCount + failedCount,
+          total: filesToDelete.length,
+        });
+      }
+
+      await refreshFiles();
+
+      if (failedCount === 0) {
+        showNotification(
+          "success",
+          "Deletion Complete",
+          `Successfully deleted ${deletedCount} item${
+            deletedCount !== 1 ? "s" : ""
+          }`
+        );
+      } else {
+        showNotification(
+          "warning",
+          "Partial Deletion",
+          `Deleted ${deletedCount} item${
+            deletedCount !== 1 ? "s" : ""
+          }, ${failedCount} failed`
+        );
+      }
+    } catch (error) {
+      console.error("Bulk delete error:", error);
+      showNotification(
+        "error",
+        "Delete Failed",
+        "An error occurred during bulk deletion"
+      );
+    } finally {
+      setIsDeleting(false);
+      setBulkDeletionProgress(null);
+      setShowBulkDeleteConfirm(false);
+      clearSelection();
+    }
+  };
+
   const handleDownloadFile = async (file: S3File) => {
     // Demo mode: show notification for downloads
     if (isDemo) {
@@ -429,6 +529,13 @@ export default function BucketFileManager() {
         // Open image preview instead of downloading
         setImagePreview({ isOpen: true, file });
       } else {
+        setIsDownloading(true);
+        showNotification(
+          "info",
+          "Download Started",
+          `Downloading ${file.name}...`
+        );
+
         try {
           // Use our API endpoint to download the file and avoid CORS issues
           const downloadUrl = `/api/s3/${encodeURIComponent(
@@ -443,6 +550,15 @@ export default function BucketFileManager() {
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
+
+          // Small delay to let browser initiate download
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
+          showNotification(
+            "success",
+            "Download Complete",
+            `${file.name} has been downloaded.`
+          );
         } catch (error) {
           console.error("Error downloading file:", error);
           showNotification(
@@ -450,13 +566,22 @@ export default function BucketFileManager() {
             "Download Failed",
             "There was an error downloading the file. Please try again."
           );
+        } finally {
+          setIsDownloading(false);
         }
       }
     }
   };
 
   const handleActualDownload = async (file: S3File) => {
-    if (file.url && bucketCredentials) {
+    if (file.url && bucketCredentials && !isDownloading) {
+      setIsDownloading(true);
+      showNotification(
+        "info",
+        "Download Started",
+        `Downloading ${file.name}...`
+      );
+
       try {
         // Use our API endpoint to download the file and avoid CORS issues
         const downloadUrl = `/api/s3/${encodeURIComponent(
@@ -471,6 +596,15 @@ export default function BucketFileManager() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+
+        // Small delay to let browser initiate download
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        showNotification(
+          "success",
+          "Download Complete",
+          `${file.name} has been downloaded.`
+        );
       } catch (error) {
         console.error("Error downloading file:", error);
         showNotification(
@@ -478,6 +612,8 @@ export default function BucketFileManager() {
           "Download Failed",
           "There was an error downloading the file. Please try again."
         );
+      } finally {
+        setIsDownloading(false);
       }
     }
   };
@@ -536,12 +672,77 @@ export default function BucketFileManager() {
                 onConfirmDelete={confirmDeleteFile}
               />
 
-              <UploadDialog
-                onUpload={handleFileUpload}
-                isUploading={isUploading}
+              {/* Bulk Delete Dialog */}
+              <BulkDeleteDialog
+                isOpen={showBulkDeleteConfirm}
+                onOpenChange={setShowBulkDeleteConfirm}
+                selectedFiles={getSelectedFileObjects()}
+                isDeleting={isDeleting}
+                deletionProgress={bulkDeletionProgress}
+                onConfirmDelete={confirmBulkDelete}
               />
+
+              <div className="flex gap-3">
+                <CreateFolderDialog
+                  onCreate={handleCreateFolder}
+                  isCreating={isCreatingFolder}
+                />
+                <UploadDialog onUpload={handleFileUpload} />
+              </div>
             </div>
           </div>
+
+          {/* Selection Controls Bar */}
+          {filteredFiles.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              {!isSelectionMode ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsSelectionMode(true)}
+                  className="text-zinc-600 dark:text-zinc-400"
+                >
+                  <CheckSquare className="w-4 h-4 mr-2" />
+                  Select Files
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={selectAllFiles}
+                    className="text-zinc-600 dark:text-zinc-400"
+                  >
+                    Select All ({filteredFiles.length})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={clearSelection}
+                    className="text-zinc-600 dark:text-zinc-400"
+                  >
+                    <X className="w-4 h-4 mr-2" />
+                    Cancel
+                  </Button>
+                  {selectedFiles.size > 0 && (
+                    <>
+                      <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                        {selectedFiles.size} selected
+                      </span>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => setShowBulkDeleteConfirm(true)}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Selected
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {/* Search and View Controls */}
           <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -578,6 +779,9 @@ export default function BucketFileManager() {
                   onDeleteFile={handleDeleteFile}
                   isDeleting={isDeleting}
                   deletingFileId={deletingFileId}
+                  selectedFiles={selectedFiles}
+                  onToggleSelect={toggleFileSelection}
+                  isSelectionMode={isSelectionMode}
                 />
               ) : (
                 <FileListView
@@ -587,6 +791,9 @@ export default function BucketFileManager() {
                   onDeleteFile={handleDeleteFile}
                   isDeleting={isDeleting}
                   deletingFileId={deletingFileId}
+                  selectedFiles={selectedFiles}
+                  onToggleSelect={toggleFileSelection}
+                  isSelectionMode={isSelectionMode}
                 />
               )}
             </>
@@ -600,6 +807,7 @@ export default function BucketFileManager() {
         onOpenChange={(open) => setImagePreview({ isOpen: open, file: null })}
         previewFile={imagePreview.file}
         onDownload={handleActualDownload}
+        isDownloading={isDownloading}
       />
     </div>
   );

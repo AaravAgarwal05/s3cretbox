@@ -57,6 +57,7 @@ export async function GET(
           type: "folder" as const,
           path: prefix,
           isFolder: true,
+          key: folderPath, // Include the key for folder deletion
         };
       }) || [];
 

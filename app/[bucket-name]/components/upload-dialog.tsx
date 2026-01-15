@@ -7,15 +7,15 @@ import {
   DialogTrigger,
 } from "../../../components/ui/dialog";
 import { Input } from "../../../components/ui/input";
-import { Loader2, Upload, X } from "lucide-react";
-import { ChangeEvent, useRef, useState, useEffect } from "react";
+import { Upload, X } from "lucide-react";
+import { ChangeEvent, useRef, useState } from "react";
 
 interface UploadDialogProps {
   onUpload: (files: FileList) => void;
-  isUploading: boolean;
+  isUploading?: boolean;
 }
 
-export const UploadDialog = ({ onUpload, isUploading }: UploadDialogProps) => {
+export const UploadDialog = ({ onUpload }: UploadDialogProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -27,28 +27,14 @@ export const UploadDialog = ({ onUpload, isUploading }: UploadDialogProps) => {
   const handleUpload = () => {
     if (selectedFiles) {
       onUpload(selectedFiles);
-      // Don't close the dialog or reset files here - let the parent handle it
+      // Close dialog and reset after adding to queue
+      setSelectedFiles(null);
+      setIsOpen(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
-
-  // Close dialog and reset when upload is complete (when isUploading changes from true to false)
-  const [wasUploading, setWasUploading] = useState(false);
-
-  useEffect(() => {
-    if (wasUploading && !isUploading) {
-      // Upload finished, reset state and close dialog after a short delay
-      setTimeout(() => {
-        setSelectedFiles(null);
-        setIsOpen(false);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
-        setWasUploading(false);
-      }, 500); // Small delay to let user see the success state
-    } else if (isUploading && !wasUploading) {
-      setWasUploading(true);
-    }
-  }, [isUploading, wasUploading]);
 
   const handleRemoveFile = (index: number) => {
     if (selectedFiles) {
@@ -63,16 +49,18 @@ export const UploadDialog = ({ onUpload, isUploading }: UploadDialogProps) => {
     }
   };
 
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const totalSize = selectedFiles
+    ? Array.from(selectedFiles).reduce((acc, f) => acc + f.size, 0)
+    : 0;
+
   return (
-    <Dialog
-      open={isOpen}
-      onOpenChange={(open) => {
-        // Don't allow closing dialog while uploading
-        if (!isUploading) {
-          setIsOpen(open);
-        }
-      }}
-    >
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-200">
           <Upload className="w-4 h-4 mr-2" />
@@ -92,26 +80,35 @@ export const UploadDialog = ({ onUpload, isUploading }: UploadDialogProps) => {
             type="file"
             multiple
             onChange={handleFileSelect}
-            disabled={isUploading}
           />
           {selectedFiles && selectedFiles.length > 0 && (
             <div className="space-y-2">
-              <p className="text-sm font-medium">Selected files:</p>
-              <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">
+                  {selectedFiles.length} file
+                  {selectedFiles.length !== 1 ? "s" : ""} selected
+                </p>
+                <p className="text-xs text-zinc-500">
+                  Total: {formatFileSize(totalSize)}
+                </p>
+              </div>
+              <div className="space-y-1 max-h-48 overflow-y-auto overflow-x-hidden">
                 {Array.from(selectedFiles).map((file, index) => (
                   <div
                     key={index}
-                    className="flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg text-sm"
+                    className="flex items-center p-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg text-sm"
                   >
-                    <span className="truncate">
-                      {file.name} ({(file.size / 1024 / 1024).toFixed(1)} MB)
+                    <span className="truncate min-w-0 flex-1 max-w-[200px]">
+                      {file.name}
+                    </span>
+                    <span className="text-xs text-zinc-500 ml-2 whitespace-nowrap">
+                      {formatFileSize(file.size)}
                     </span>
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={() => handleRemoveFile(index)}
-                      disabled={isUploading}
-                      className="ml-2 h-6 w-6 p-0"
+                      className="h-6 w-6 p-0 ml-1 shrink-0"
                     >
                       <X className="w-3 h-3" />
                     </Button>
@@ -120,26 +117,20 @@ export const UploadDialog = ({ onUpload, isUploading }: UploadDialogProps) => {
               </div>
             </div>
           )}
+
+          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+            Files will upload in the background. You can continue browsing while
+            uploads complete.
+          </div>
+
           <Button
             onClick={handleUpload}
-            disabled={
-              !selectedFiles || selectedFiles.length === 0 || isUploading
-            }
+            disabled={!selectedFiles || selectedFiles.length === 0}
             className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"
           >
-            {isUploading ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Uploading {selectedFiles?.length} file
-                {selectedFiles?.length !== 1 ? "s" : ""}...
-              </>
-            ) : (
-              <>
-                <Upload className="w-4 h-4 mr-2" />
-                Upload {selectedFiles?.length} file
-                {selectedFiles?.length !== 1 ? "s" : ""}
-              </>
-            )}
+            <Upload className="w-4 h-4 mr-2" />
+            Add {selectedFiles?.length || 0} file
+            {selectedFiles?.length !== 1 ? "s" : ""} to upload queue
           </Button>
         </div>
       </DialogContent>
