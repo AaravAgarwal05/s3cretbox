@@ -284,36 +284,36 @@ export default function Homepage() {
 
         {/* Main Content */}
         <div className="flex-1 overflow-auto">
-          <div className="p-6 lg:p-8">
+          <div className="p-4 sm:p-6 lg:p-8">
             {selectedBucket ? (
               <div className="max-w-4xl mx-auto">
-                <div className="mb-8">
-                  <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+                <div className="mb-6 sm:mb-8">
+                  <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-2 truncate">
                     {selectedBucket.name}
                   </h1>
-                  <p className="text-zinc-600 dark:text-zinc-400">
+                  <p className="text-sm sm:text-base text-zinc-600 dark:text-zinc-400">
                     Manage your encrypted S3 bucket configuration
                   </p>
                 </div>
 
-                <div className="grid gap-6">
+                <div className="grid gap-4 sm:gap-6">
                   {/* Bucket Info Card */}
-                  <Card className="border-2 border-zinc-200 dark:border-zinc-700">
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
+                  <Card className="border-2 border-zinc-200 dark:border-zinc-700 overflow-hidden">
+                    <CardHeader className="pb-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div>
-                          <CardTitle className="flex items-center">
-                            <Server className="w-5 h-5 mr-2" />
+                          <CardTitle className="flex items-center text-base sm:text-lg">
+                            <Server className="w-5 h-5 mr-2 shrink-0" />
                             Bucket Information
                           </CardTitle>
-                          <CardDescription>
+                          <CardDescription className="text-sm">
                             View and manage your S3 bucket details
                           </CardDescription>
                         </div>
                         <Button
                           variant="outline"
                           onClick={() => handleEditBucket(selectedBucket)}
-                          className="flex items-center"
+                          className="flex items-center w-full sm:w-auto"
                         >
                           <Edit className="w-4 h-4 mr-2" />
                           Edit
@@ -322,25 +322,27 @@ export default function Homepage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
+                        <div className="min-w-0">
                           <Label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                             Bucket Name
                           </Label>
-                          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                          <p className="text-base sm:text-lg font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                             {selectedBucket.name}
                           </p>
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <Label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                             Region
                           </Label>
-                          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 flex items-center">
-                            <Globe className="w-4 h-4 mr-2" />
-                            {
-                              awsRegions.find(
-                                (r) => r.value === selectedBucket.region
-                              )?.label
-                            }
+                          <p className="text-base sm:text-lg font-semibold text-zinc-900 dark:text-zinc-100 flex items-center">
+                            <Globe className="w-4 h-4 mr-2 shrink-0" />
+                            <span className="truncate">
+                              {
+                                awsRegions.find(
+                                  (r) => r.value === selectedBucket.region
+                                )?.label
+                              }
+                            </span>
                           </p>
                         </div>
                       </div>
@@ -348,44 +350,47 @@ export default function Homepage() {
                   </Card>
 
                   {/* Credentials Card */}
-                  <Card className="border-2 border-orange-200 dark:border-orange-800">
+                  <Card className="border-2 border-orange-200 dark:border-orange-800 overflow-hidden">
                     <CardHeader>
-                      <CardTitle className="flex items-center text-orange-800 dark:text-orange-200">
-                        <Key className="w-5 h-5 mr-2" />
+                      <CardTitle className="flex items-center text-orange-800 dark:text-orange-200 text-base sm:text-lg">
+                        <Key className="w-5 h-5 mr-2 shrink-0" />
                         Encrypted Credentials
                       </CardTitle>
-                      <CardDescription>
+                      <CardDescription className="text-sm">
                         Your AWS credentials are encrypted locally with your PIN
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div>
+                      <div className="min-w-0">
                         <Label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                           Access Key ID
                         </Label>
-                        <div className="bg-zinc-100 dark:bg-zinc-800 p-3 rounded-lg font-mono text-sm">
+                        <div className="bg-zinc-100 dark:bg-zinc-800 p-3 rounded-lg font-mono text-xs sm:text-sm overflow-x-auto">
                           {selectedBucket?.accessKey
                             ? maskAccessKey(selectedBucket.accessKey)
                             : "No access key"}
                         </div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <Label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                           Secret Access Key
                         </Label>
-                        <div className="flex items-center space-x-2">
-                          <div className="bg-zinc-100 dark:bg-zinc-800 p-3 rounded-lg font-mono text-sm flex-1">
-                            {selectedBucket?.secretKey
-                              ? showSecretKey
-                                ? selectedBucket.secretKey
-                                : maskSecretKey(selectedBucket.secretKey)
-                              : "No secret key"}
+                        <div className="flex items-center gap-2">
+                          <div className="bg-zinc-100 dark:bg-zinc-800 p-3 rounded-lg font-mono text-xs sm:text-sm flex-1 min-w-0 overflow-x-auto">
+                            <span className="whitespace-nowrap">
+                              {selectedBucket?.secretKey
+                                ? showSecretKey
+                                  ? selectedBucket.secretKey
+                                  : maskSecretKey(selectedBucket.secretKey)
+                                : "No secret key"}
+                            </span>
                           </div>
                           <Button
                             variant="outline"
                             size="icon"
                             onClick={() => setShowSecretKey(!showSecretKey)}
                             disabled={!selectedBucket?.secretKey}
+                            className="shrink-0"
                           >
                             {showSecretKey ? (
                               <EyeOff className="w-4 h-4" />

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { S3Client } from "@aws-sdk/client-s3";
-import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export async function POST(
   request: NextRequest,
@@ -33,24 +33,21 @@ export async function POST(
     // Construct the S3 key
     const key = prefix ? `${prefix}${fileName}` : fileName;
 
-    // Create presigned POST URL (works for files up to 5GB)
-    const { url, fields } = await createPresignedPost(s3Client, {
+    // Create presigned PUT URL (simpler, better CORS support)
+    const command = new PutObjectCommand({
       Bucket: decodedBucketName,
       Key: key,
-      Conditions: [
-        ["content-length-range", 0, 5 * 1024 * 1024 * 1024], // Up to 5GB
-        ["starts-with", "$Content-Type", ""],
-      ],
-      Fields: {
-        "Content-Type": contentType || "application/octet-stream",
-      },
-      Expires: 3600, // URL valid for 1 hour
+      ContentType: contentType || "application/octet-stream",
+    });
+
+    const presignedUrl = await getSignedUrl(s3Client, command, {
+      expiresIn: 3600, // URL valid for 1 hour
     });
 
     return NextResponse.json({
-      url,
-      fields,
+      url: presignedUrl,
       key,
+      method: "PUT",
     });
   } catch (error) {
     console.error("Error generating presigned URL:", error);

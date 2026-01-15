@@ -114,20 +114,13 @@ export const UploadManagerProvider = ({
           }
         );
 
-        const { url, fields } = presignedResponse.data;
+        const { url } = presignedResponse.data;
 
-        // Step 2: Upload directly to S3 using presigned POST
-        const formData = new FormData();
-
-        // Add all the presigned fields first (order matters!)
-        Object.entries(fields).forEach(([key, value]) => {
-          formData.append(key, value as string);
-        });
-
-        // Add the file last
-        formData.append("file", uploadFile.file);
-
-        await axios.post(url, formData, {
+        // Step 2: Upload directly to S3 using presigned PUT URL
+        await axios.put(url, uploadFile.file, {
+          headers: {
+            "Content-Type": uploadFile.file.type || "application/octet-stream",
+          },
           cancelToken: cancelSource.token,
           onUploadProgress: (progressEvent) => {
             const percentage = progressEvent.total
@@ -165,6 +158,7 @@ export const UploadManagerProvider = ({
           const errorMessage = axios.isAxiosError(error)
             ? error.response?.data?.error || error.message
             : "Upload failed";
+          console.error("Upload error:", error);
           setUploadingFiles((prev) =>
             prev.map((f) =>
               f.id === uploadFile.id
