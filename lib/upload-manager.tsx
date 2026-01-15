@@ -201,115 +201,23 @@ export const UploadManagerProvider = ({
       setMinimized(false);
 
       // Start uploading each file
-      newFiles.forEach((uploadFile) => {
-        uploadFile.status = "pending";
+      newFiles.forEach((newFile) => {
+        newFile.status = "pending";
         // Use setTimeout to batch the state updates
         setTimeout(() => {
           // Check if the upload wasn't cancelled before it started
           setUploadingFiles((current) => {
-            const file = current.find((f) => f.id === uploadFile.id);
+            const file = current.find((f) => f.id === newFile.id);
             if (file && file.status === "pending") {
-              // Start the upload
-              uploadFile.status = "uploading";
-              // Actually start the upload process
-              void (async () => {
-                await new Promise<void>((resolve) => {
-                  const doUpload = async () => {
-                    await uploadFileInternal(uploadFile, credentials);
-                    resolve();
-                  };
-                  doUpload();
-                });
-              })();
+              // Start the upload using presigned URLs
+              uploadFile(newFile, credentials);
             }
             return current;
           });
         }, 100);
       });
     },
-    []
-  );
-
-  const uploadFileInternal = useCallback(
-    async (
-      file: UploadingFile,
-      credentials: UploadCredentials
-    ): Promise<void> => {
-      const cancelSource = axios.CancelToken.source();
-      cancelTokensRef.current.set(file.id, cancelSource);
-
-      // Update status to uploading
-      setUploadingFiles((prev) =>
-        prev.map((f) =>
-          f.id === file.id ? { ...f, status: "uploading" as const } : f
-        )
-      );
-
-      try {
-        const formData = new FormData();
-        formData.append("file", file.file);
-        formData.append("prefix", file.path ? `${file.path}/` : "");
-        formData.append("accessKey", credentials.accessKey);
-        formData.append("secretKey", credentials.secretKey);
-        formData.append("region", credentials.region);
-
-        await axios.post(
-          `/api/s3/${encodeURIComponent(file.bucketName)}/upload`,
-          formData,
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-            cancelToken: cancelSource.token,
-            onUploadProgress: (progressEvent) => {
-              const percentage = progressEvent.total
-                ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
-                : 0;
-              setUploadingFiles((prev) =>
-                prev.map((f) =>
-                  f.id === file.id ? { ...f, progress: percentage } : f
-                )
-              );
-            },
-          }
-        );
-
-        // Mark as completed
-        setUploadingFiles((prev) =>
-          prev.map((f) =>
-            f.id === file.id
-              ? { ...f, status: "completed" as const, progress: 100 }
-              : f
-          )
-        );
-
-        // Call the refresh callback if set
-        onUploadCompleteRef.current?.();
-      } catch (error) {
-        if (axios.isCancel(error)) {
-          setUploadingFiles((prev) =>
-            prev.map((f) =>
-              f.id === file.id ? { ...f, status: "cancelled" as const } : f
-            )
-          );
-        } else {
-          setUploadingFiles((prev) =>
-            prev.map((f) =>
-              f.id === file.id
-                ? {
-                    ...f,
-                    status: "failed" as const,
-                    error: "Upload failed",
-                  }
-                : f
-            )
-          );
-        }
-      } finally {
-        cancelTokensRef.current.delete(file.id);
-      }
-    },
-    []
+    [uploadFile]
   );
 
   const cancelUpload = useCallback((fileId: string) => {
