@@ -96,33 +96,50 @@ export const UploadManagerProvider = ({
       );
 
       try {
-        const formData = new FormData();
-        formData.append("file", uploadFile.file);
-        formData.append("prefix", uploadFile.path ? `${uploadFile.path}/` : "");
-        formData.append("accessKey", credentials.accessKey);
-        formData.append("secretKey", credentials.secretKey);
-        formData.append("region", credentials.region);
-
-        await axios.post(
-          `/api/s3/${encodeURIComponent(uploadFile.bucketName)}/upload`,
-          formData,
+        // Step 1: Get presigned URL from our API (small request, no body size limit issue)
+        const presignedResponse = await axios.post(
+          `/api/s3/${encodeURIComponent(
+            uploadFile.bucketName
+          )}/presigned-upload`,
           {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
+            fileName: uploadFile.file.name,
+            contentType: uploadFile.file.type || "application/octet-stream",
+            prefix: uploadFile.path ? `${uploadFile.path}/` : "",
+            accessKey: credentials.accessKey,
+            secretKey: credentials.secretKey,
+            region: credentials.region,
+          },
+          {
             cancelToken: cancelSource.token,
-            onUploadProgress: (progressEvent) => {
-              const percentage = progressEvent.total
-                ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
-                : 0;
-              setUploadingFiles((prev) =>
-                prev.map((f) =>
-                  f.id === uploadFile.id ? { ...f, progress: percentage } : f
-                )
-              );
-            },
           }
         );
+
+        const { url, fields } = presignedResponse.data;
+
+        // Step 2: Upload directly to S3 using presigned POST
+        const formData = new FormData();
+
+        // Add all the presigned fields first (order matters!)
+        Object.entries(fields).forEach(([key, value]) => {
+          formData.append(key, value as string);
+        });
+
+        // Add the file last
+        formData.append("file", uploadFile.file);
+
+        await axios.post(url, formData, {
+          cancelToken: cancelSource.token,
+          onUploadProgress: (progressEvent) => {
+            const percentage = progressEvent.total
+              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              : 0;
+            setUploadingFiles((prev) =>
+              prev.map((f) =>
+                f.id === uploadFile.id ? { ...f, progress: percentage } : f
+              )
+            );
+          },
+        });
 
         // Mark as completed
         setUploadingFiles((prev) =>
@@ -145,13 +162,16 @@ export const UploadManagerProvider = ({
             )
           );
         } else {
+          const errorMessage = axios.isAxiosError(error)
+            ? error.response?.data?.error || error.message
+            : "Upload failed";
           setUploadingFiles((prev) =>
             prev.map((f) =>
               f.id === uploadFile.id
                 ? {
                     ...f,
                     status: "failed" as const,
-                    error: "Upload failed",
+                    error: errorMessage,
                   }
                 : f
             )
